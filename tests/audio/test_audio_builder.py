@@ -8,16 +8,17 @@ from app.infrastructure.audio.base import TTSProvider
 from app.domain.models.narration_segment import NarrationSegment
 from app.core.exceptions import VoiceGenerationException
 
-# A valid 0.03 second silent MP3 base64 encoded string
-SILENT_MP3_B64 = (
-    "SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjU4Ljc2LjEwMAAAAAAAAAAAAAAA/+M4wAAAAAAAAAAAAEluZm8AAAAPAAAA"
-    "AwAAAbAAqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV"
-    "1dXV////////////////////////////////////////////AAAAAExhdmM1OC4xMwAAAAAAAAAAAAAAACQDkAAAAAAA"
-    "AAGw9wrNaQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA/+MYxAAAAANIAAAAAExB"
-    "TUUzLjEwMFVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV/+MYxDsAAANIAAAA"
-    "AFVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV/+MYxHYAAANI"
-    "AAAAAFVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV"
-)
+import io
+import wave
+
+def get_silent_wav_bytes(duration_sec=3.5, rate=44100):
+    buf = io.BytesIO()
+    with wave.open(buf, "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(rate)
+        w.writeframes(b"\x00\x00" * int(rate * duration_sec))
+    return buf.getvalue()
 
 @pytest.fixture
 def temp_output_dir(tmp_path):
@@ -28,7 +29,7 @@ def temp_output_dir(tmp_path):
 
 def test_audio_builder_success(temp_output_dir):
     mock_provider = MagicMock(spec=TTSProvider)
-    mock_provider.synthesize.return_value = base64.b64decode(SILENT_MP3_B64)
+    mock_provider.synthesize.return_value = get_silent_wav_bytes(3.5)
 
     segment = NarrationSegment(
         unit_id="unit-1234",
@@ -46,10 +47,12 @@ def test_audio_builder_success(temp_output_dir):
     assert os.path.exists(clip.storage_path)
     assert os.path.getsize(clip.storage_path) > 0
     
-    # Mutagen checks
-    from mutagen.mp3 import MP3
-    audio = MP3(clip.storage_path)
-    assert abs(clip.duration_sec - audio.info.length) < 0.01
+    # Wave duration check
+    with wave.open(clip.storage_path, "rb") as wav_file:
+        frames = wav_file.getnframes()
+        rate = wav_file.getframerate()
+        duration = frames / float(rate)
+    assert abs(clip.duration_sec - duration) < 0.01
 
 def test_audio_builder_empty_narration(temp_output_dir):
     builder = AudioBuilder()

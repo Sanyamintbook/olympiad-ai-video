@@ -47,6 +47,10 @@ def update_job_status(job_id: str, status: str, stage: str, units_done: int = -1
 
 async def parse_document_task(job_id: str, document_id: str, file_path: str, output_dir: str):
     logger.info(f"[{job_id}] Starting parse_document_task")
+    if os.path.exists(os.path.join(output_dir, "edu_content.json")) and os.path.exists(os.path.join(output_dir, "faiss_index")):
+        logger.info(f"[{job_id}] Skipping parse_document_task: Output already exists.")
+        return {"status": "SUCCESS", "document_id": document_id}
+        
     update_job_status(job_id, "RUNNING", "parsing", document_id=document_id)
     try:
         parser = PdfParser()
@@ -84,6 +88,10 @@ async def parse_document_task(job_id: str, document_id: str, file_path: str, out
 
 async def understand_content_task(job_id: str, document_id: str, output_dir: str):
     logger.info(f"[{job_id}] Starting understand_content_task")
+    if os.path.exists(os.path.join(output_dir, "understanding.json")):
+        logger.info(f"[{job_id}] Skipping understand_content_task: Output already exists.")
+        return {"status": "SUCCESS"}
+        
     update_job_status(job_id, "RUNNING", "understanding")
     try:
         with open(os.path.join(output_dir, "edu_content.json"), "r", encoding="utf-8") as f:
@@ -110,6 +118,10 @@ async def understand_content_task(job_id: str, document_id: str, output_dir: str
 
 async def plan_lesson_task(job_id: str, document_id: str, output_dir: str):
     logger.info(f"[{job_id}] Starting plan_lesson_task")
+    if os.path.exists(os.path.join(output_dir, "lesson_plan.json")):
+        logger.info(f"[{job_id}] Skipping plan_lesson_task: Output already exists.")
+        return {"status": "SUCCESS"}
+        
     update_job_status(job_id, "RUNNING", "lesson_planning")
     try:
         with open(os.path.join(output_dir, "understanding.json"), "r", encoding="utf-8") as f:
@@ -135,6 +147,13 @@ async def plan_lesson_task(job_id: str, document_id: str, output_dir: str):
 
 async def generate_units_task(job_id: str, document_id: str, output_dir: str):
     logger.info(f"[{job_id}] Starting generate_units_task")
+    if os.path.exists(os.path.join(output_dir, "teaching_units.json")):
+        logger.info(f"[{job_id}] Skipping generate_units_task: Output already exists.")
+        with open(os.path.join(output_dir, "teaching_units.json"), "r", encoding="utf-8") as f:
+            units = json.load(f)
+        update_job_status(job_id, "RUNNING", "unit_planning", units_done=0, units_total=len(units))
+        return {"status": "SUCCESS", "units_count": len(units)}
+        
     update_job_status(job_id, "RUNNING", "unit_planning")
     try:
         with open(os.path.join(output_dir, "lesson_plan.json"), "r", encoding="utf-8") as f:
@@ -170,6 +189,15 @@ async def generate_narration_for_unit_task(job_id: str, unit_dict: dict, output_
     unit_id = unit_dict["unit_id"]
     logger.info(f"[{job_id}] Generating narration for unit: {unit_id}")
     try:
+        fail_path = os.path.join(output_dir, f"failure_narration_{unit_id}.json")
+        if os.path.exists(fail_path):
+            os.remove(fail_path)
+            
+        success_path = os.path.join(output_dir, f"narration_{unit_id}.json")
+        if os.path.exists(success_path):
+            logger.info(f"[{job_id}] Skipping narration for unit {unit_id}: Output already exists.")
+            return {"status": "SUCCESS", "unit_id": unit_id}
+            
         unit = TeachingUnit(**unit_dict)
         
         query_parts = [unit.learning_goal]
@@ -184,7 +212,8 @@ async def generate_narration_for_unit_task(job_id: str, unit_dict: dict, output_
                 from app.infrastructure.rag.vector_store import LocalVectorStore
                 vector_store = LocalVectorStore()
                 vector_store.load(faiss_dir)
-                retrieved_chunks = vector_store.similarity_search(query, top_k=3)
+                # FIX: Use asyncio.to_thread to prevent synchronous HTTP call from blocking the async event loop
+                retrieved_chunks = await asyncio.to_thread(vector_store.similarity_search, query, top_k=3)
                 if retrieved_chunks:
                     source_context = "\n\n".join(retrieved_chunks)
             except Exception as ex:
@@ -242,6 +271,15 @@ async def validate_narration_for_unit_task(job_id: str, unit_dict: dict, output_
 def synthesize_audio_for_unit_task(job_id: str, unit_id: str, output_dir: str):
     logger.info(f"[{job_id}] Synthesizing audio for unit: {unit_id}")
     try:
+        fail_path = os.path.join(output_dir, f"failure_audio_{unit_id}.json")
+        if os.path.exists(fail_path):
+            os.remove(fail_path)
+            
+        success_path = os.path.join(output_dir, f"audio_clip_{unit_id}.json")
+        if os.path.exists(success_path):
+            logger.info(f"[{job_id}] Skipping audio for unit {unit_id}: Output already exists.")
+            return {"status": "SUCCESS", "unit_id": unit_id}
+            
         narration_fail_path = os.path.join(output_dir, f"failure_narration_{unit_id}.json")
         if os.path.exists(narration_fail_path):
             raise VoiceGenerationException("Skipped audio synthesis because narration generation failed.")
@@ -268,6 +306,15 @@ def build_slide_for_unit_task(job_id: str, unit_dict: dict, output_dir: str):
     unit_id = unit_dict["unit_id"]
     logger.info(f"[{job_id}] Building slide for unit: {unit_id}")
     try:
+        fail_path = os.path.join(output_dir, f"failure_slide_{unit_id}.json")
+        if os.path.exists(fail_path):
+            os.remove(fail_path)
+            
+        success_path = os.path.join(output_dir, f"slide_{unit_id}.json")
+        if os.path.exists(success_path):
+            logger.info(f"[{job_id}] Skipping slide for unit {unit_id}: Output already exists.")
+            return {"status": "SUCCESS", "unit_id": unit_id}
+            
         narration_path = os.path.join(output_dir, f"narration_{unit_id}.json")
         speaker_notes = ""
         if os.path.exists(narration_path):
@@ -294,25 +341,11 @@ def build_slide_for_unit_task(job_id: str, unit_dict: dict, output_dir: str):
         return {"status": "FAILED", "unit_id": unit_id}
 
 async def process_unit(job_id: str, unit_dict: dict, output_dir: str):
-    unit_id = unit_dict["unit_id"]
-    
-    logger.info(f"[{job_id}] Narration Generation for unit {unit_id}")
-    await generate_narration_for_unit_task(job_id, unit_dict, output_dir)
-    
-    # 10x SPEEDUP: Validation step disabled completely to skip unnecessary secondary AI calls.
-    # val_result = await validate_narration_for_unit_task(job_id, unit_dict, output_dir)
-    
-    narration_fail_path = os.path.join(output_dir, f"failure_narration_{unit_id}.json")
-    if os.path.exists(narration_fail_path):
-        logger.error(f"[{job_id}] Unit {unit_id} failed narration. Skipping audio/slide build.")
-        return
-        
-    # audio builder has sync blocking I/O, run in executor if needed, but here sync is fine for local
-    await asyncio.to_thread(synthesize_audio_for_unit_task, job_id, unit_id, output_dir)
-    await asyncio.to_thread(build_slide_for_unit_task, job_id, unit_dict, output_dir)
+    # Deprecated by 2-Stage Async Producer-Consumer Queue below
+    pass
 
 async def trigger_unit_parallelism_task(job_id: str, document_id: str, output_dir: str):
-    logger.info(f"[{job_id}] Starting trigger_unit_parallelism_task (CONCURRENT for 10x local speed)")
+    logger.info(f"[{job_id}] Starting trigger_unit_parallelism_task (2-Stage Async Producer-Consumer Queue)")
     update_job_status(job_id, "RUNNING", "audio_synthesis")
     try:
         with open(os.path.join(output_dir, "teaching_units.json"), "r", encoding="utf-8") as f:
@@ -325,19 +358,66 @@ async def trigger_unit_parallelism_task(job_id: str, document_id: str, output_di
         total_units = len(units_list)
         units_done = 0
         
-        # CRITICAL FIX: Enforce sequential generation to prevent local GPU memory thrashing / CPU RAM swapping
-        semaphore = asyncio.Semaphore(1)
+        # 2-Stage Async Queue: Ollama produces scripts sequentially, while Kokoro & PPTX consume in parallel
+        media_queue = asyncio.Queue()
+        consumer_workers_count = min(4, (os.cpu_count() or 2))
         
-        async def process_with_sem(unit_dict):
+        async def media_consumer_worker(worker_id: int):
             nonlocal units_done
-            async with semaphore:
-                logger.info(f"--- [Progress] Processing Unit: {unit_dict.get('learning_goal', 'Unknown')} ---")
-                await process_unit(job_id, unit_dict, output_dir)
-                units_done += 1
-                update_job_status(job_id, "RUNNING", "audio_synthesis", units_done=units_done, units_total=total_units)
+            while True:
+                try:
+                    unit_dict = await media_queue.get()
+                except asyncio.CancelledError:
+                    break
+                if unit_dict is None:
+                    media_queue.task_done()
+                    break
+                unit_id = unit_dict["unit_id"]
+                try:
+                    logger.info(f"[Worker-{worker_id}] Synthesizing audio & slide for unit: {unit_id}")
+                    await asyncio.to_thread(synthesize_audio_for_unit_task, job_id, unit_id, output_dir)
+                    await asyncio.to_thread(build_slide_for_unit_task, job_id, unit_dict, output_dir)
+                except Exception as ex:
+                    logger.error(f"[Worker-{worker_id}] Error in media generation for {unit_id}: {ex}")
+                finally:
+                    units_done += 1
+                    update_job_status(job_id, "RUNNING", "audio_synthesis", units_done=units_done, units_total=total_units)
+                    media_queue.task_done()
+                    
+        # Launch background consumer workers
+        consumers = [asyncio.create_task(media_consumer_worker(i + 1)) for i in range(consumer_workers_count)]
+        
+        # Stage 1: Sequential LLM Script Producer (Multi-tenant Resilience)
+        # We strictly lock this to 1 concurrent request so we don't spam the shared Ollama server
+        script_semaphore = asyncio.Semaphore(1)
+        
+        async def produce_script(unit_dict):
+            async with script_semaphore:
+                unit_id = unit_dict["unit_id"]
+                logger.info(f"--- [LLM Producer] Generating Narration Script for Unit: {unit_id} ({unit_dict.get('learning_goal', '')}) ---")
+                await generate_narration_for_unit_task(job_id, unit_dict, output_dir)
                 
-        tasks = [process_with_sem(u) for u in units_list]
-        await asyncio.gather(*tasks)
+                narration_fail_path = os.path.join(output_dir, f"failure_narration_{unit_id}.json")
+                if not os.path.exists(narration_fail_path):
+                    await media_queue.put(unit_dict)
+                else:
+                    nonlocal units_done
+                    logger.error(f"[{job_id}] Unit {unit_id} failed narration generation. Skipping media queue.")
+                    units_done += 1
+                    update_job_status(job_id, "RUNNING", "audio_synthesis", units_done=units_done, units_total=total_units)
+                    
+        # Launch all script producer tasks concurrently
+        producer_tasks = [asyncio.create_task(produce_script(u)) for u in units_list]
+        await asyncio.gather(*producer_tasks)
+                
+        # Signal consumer workers to terminate once queue is empty
+        for _ in range(consumer_workers_count):
+            await media_queue.put(None)
+            
+        # Wait for all background media workers to complete
+        await media_queue.join()
+        for c in consumers:
+            c.cancel()
             
         await finalize_pipeline_task(job_id, document_id, output_dir)
         return {"status": "SUCCESS", "queued_units": len(units_list)}
@@ -373,7 +453,7 @@ async def finalize_pipeline_task(job_id: str, document_id: str, output_dir: str)
             else:
                 narration_segments.append(NarrationSegment(
                     unit_id=unit_id,
-                    narration_text="",
+                    narration_text="[GENERATION FAILED] This slide failed to generate narration. Please review logs.",
                     estimated_duration_sec=0.0,
                     validation_status="FAIL",
                     validation_notes=["Narration generation failed."]

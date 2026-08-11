@@ -6,19 +6,19 @@ from app.domain.models.source_document import SourceDocument
 
 def test_teaching_unit_keywords_bounds():
     with pytest.raises(ValidationError):
-        TeachingUnit(unit_id="u1", lesson_id="l1", order=1, learning_goal="G", keywords=["A", "B"], source_refs=["ref"])
+        TeachingUnit(unit_id="u1", lesson_id="l1", order=1, learning_goal="G", bullet_sentences=["A", "B"], source_refs=["ref"])
 
     with pytest.raises(ValidationError):
-        TeachingUnit(unit_id="u1", lesson_id="l1", order=1, learning_goal="G", keywords=["1", "2", "3", "4", "5", "6", "7"], source_refs=["ref"])
+        TeachingUnit(unit_id="u1", lesson_id="l1", order=1, learning_goal="G", bullet_sentences=["1", "2", "3", "4", "5", "6", "7"], source_refs=["ref"])
 
     # Valid
-    tu = TeachingUnit(unit_id="u1", lesson_id="l1", order=1, learning_goal="G", keywords=["A", "B", "C"], source_refs=["ref"])
-    assert len(tu.keywords) == 3
+    tu = TeachingUnit(unit_id="u1", lesson_id="l1", order=1, learning_goal="G", bullet_sentences=["A", "B", "C"], source_refs=["ref"])
+    assert len(tu.bullet_sentences) == 3
 
 def test_slide_bullets_match_unit_keywords():
-    tu = TeachingUnit(unit_id="u1", lesson_id="l1", order=1, learning_goal="G", keywords=["A", "B", "C"], source_refs=["ref"])
-    slide = Slide(unit_id=tu.unit_id, title=tu.learning_goal, bullets=tu.keywords)
-    assert slide.bullets == tu.keywords
+    tu = TeachingUnit(unit_id="u1", lesson_id="l1", order=1, learning_goal="G", bullet_sentences=["A", "B", "C"], source_refs=["ref"])
+    slide = Slide(unit_id=tu.unit_id, title=tu.learning_goal, bullets=tu.bullet_sentences)
+    assert slide.bullets == tu.bullet_sentences
     
 def test_source_document_validation():
     with pytest.raises(ValidationError):
@@ -34,7 +34,7 @@ def test_source_ref_exact_match():
     # Valid unit where the ref exists in the text
     tu_valid = TeachingUnit(
         unit_id="u1", lesson_id="l1", order=1, learning_goal="Learn Photosynthesis",
-        keywords=["Process", "Plants", "Food"],
+        bullet_sentences=["Process", "Plants", "Food"],
         source_refs=["Photosynthesis is the process"]
     )
     
@@ -45,7 +45,7 @@ def test_source_ref_exact_match():
     # In a real pipeline, TeachingUnitPlannerAgent output is validated against the raw text.
     tu_invalid = TeachingUnit(
         unit_id="u2", lesson_id="l1", order=2, learning_goal="Unknown",
-        keywords=["A", "B", "C"],
+        bullet_sentences=["A", "B", "C"],
         source_refs=["This text is hallucinated and not in the source"]
     )
     

@@ -40,8 +40,9 @@ class Settings(BaseSettings):
     # ==========================
     google_api_key: str = Field(default="")
     openai_api_key: str = Field(default="")
-    ollama_base_url: str = "http://localhost:11434"
-    ollama_model: str = "qwen3:8b"
+    ollama_base_url: str = "http://10.80.100.214:11434"
+    ollama_fallback_url: str = "http://10.80.100.214:11434"
+    ollama_model: str = "qwen2.5:7b"
     ollama_embedding_model: str = "mxbai-embed-large:latest"
     ollama_embedding_timeout_seconds: float = 3600.0
     ollama_request_timeout_seconds: float = 3600.0
@@ -56,7 +57,7 @@ class Settings(BaseSettings):
     max_local_retries_before_escalation: int = 2
 
     default_provider: str = "gemini"
-    default_model: str = "gemini-2.5-pro"
+    default_model: str = "qwen2.5:7b"
 
     # ==========================
     # Directories

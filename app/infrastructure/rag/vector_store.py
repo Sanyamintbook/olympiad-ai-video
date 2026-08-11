@@ -61,14 +61,24 @@ class LocalVectorStore:
         with httpx.Client(timeout=get_settings().ollama_embedding_timeout_seconds) as client:
             try:
                 # 10x SPEEDUP: Use Ollama's native batch embedding endpoint (/api/embed)
-                response = client.post(
-                    f"{self.base_url}/api/embed",
-                    json={"model": self.model, "input": texts}
-                )
-                if response.status_code == 200:
-                    data = response.json()
-                    if "embeddings" in data:
-                        return data["embeddings"]
+                # Chunk texts into batches of 50 to avoid Payload Too Large errors on massive PDFs
+                all_embeddings = []
+                batch_size = 50
+                for i in range(0, len(texts), batch_size):
+                    batch_texts = texts[i:i + batch_size]
+                    response = client.post(
+                        f"{self.base_url}/api/embed",
+                        json={"model": self.model, "input": batch_texts}
+                    )
+                    if response.status_code == 200:
+                        data = response.json()
+                        if "embeddings" in data:
+                            all_embeddings.extend(data["embeddings"])
+                        else:
+                            raise Exception("No embeddings key in response")
+                    else:
+                        raise Exception(f"HTTP {response.status_code}")
+                return all_embeddings
             except Exception as exc:
                 logger.warning(f"Fast batch /api/embed failed ({exc}), falling back to sequential /api/embeddings")
 

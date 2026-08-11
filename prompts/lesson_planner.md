@@ -24,18 +24,19 @@ Full Understanding JSON:
 {understanding_json}
 
 Build a logical teaching sequence that a teacher would use in class.
-Preserve the educational order of the major topics and subtopics.
-Every major topic must appear in one lesson.
-Every lesson must cover one teaching goal.
-Every lesson must include an objective and estimated_minutes.
+Preserve the educational order of the subtopics.
 
-**CRITICAL GRANULARITY RULE:** You MUST generate EXACTLY ONE lesson for EVERY SINGLE subtopic listed in the "Subtopics" array above. If there are N subtopics, you must return an array of exactly N lessons. Do not combine or skip them. The goal is to be highly granular.
+**CRITICAL GRANULARITY RULE:** You MUST generate EXACTLY ONE lesson in the "lessons" array for EVERY SINGLE subtopic listed in the "Subtopics" array above!
+If there are 47 subtopics in the "Subtopics" list, your "lessons" array MUST contain exactly 47 lesson objects.
+DO NOT group subtopics by major topic. DO NOT combine subtopics. Every single subtopic MUST have its own dedicated lesson object in the array.
+Every lesson must include a sequence number, title, objective, and estimated_minutes.
 
 **CRITICAL RULES:**
 1. Focus exclusively on instructional content and conceptual explanations.
 2. Maintain the exact hierarchy provided in the understanding data.
 3. Include only those concepts that are present in the understanding data.
-4. **CRITICAL (JSON DICT ONLY):** You MUST output ONLY a single JSON dictionary object (`{{}}`). Do not wrap it in anything else. Failure to return a valid JSON dictionary will break the system.
+4. **NATURAL TITLES ONLY**: Do NOT use words like "Major Topic:", "Subtopic:", "Section:", or "Chapter:" in your lesson titles. Use clean, natural, human-readable titles (e.g., "Anatomy of a Frog" instead of "Major Topic: Anatomy of a Frog").
+5. **CRITICAL (JSON DICT ONLY):** You MUST output ONLY a single JSON dictionary object (`{{}}`). Do not wrap it in anything else. Failure to return a valid JSON dictionary will break the system.
 
 Return valid JSON only.
 

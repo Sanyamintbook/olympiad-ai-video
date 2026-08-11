@@ -20,6 +20,9 @@ class OllamaProvider(LLMProvider):
     def __init__(self) -> None:
         settings = get_settings()
         self.base_url = settings.ollama_base_url.rstrip("/")
+        self.fallback_url = getattr(settings, "ollama_fallback_url", None)
+        if self.fallback_url:
+            self.fallback_url = self.fallback_url.rstrip("/")
         self.model = settings.default_model
 
     async def _resolve_local_model(self) -> None:
@@ -40,7 +43,7 @@ class OllamaProvider(LLMProvider):
                         gen_models = [m for m in models if "embed" not in m.lower()]
                         if gen_models:
                             # Prioritize larger/better models if present
-                            for p_model in ["qwen3:8b", "qwen2.5:7b", "qwen2.5:3b"]:
+                            for p_model in ["qwen2.5:7b", "qwen3:8b", "qwen2.5:3b"]:
                                 for gm in gen_models:
                                     if p_model in gm:
                                         self.model = gm
@@ -68,6 +71,7 @@ class OllamaProvider(LLMProvider):
             "model": self.model,
             "prompt": prompt,
             "stream": False,
+            "keep_alive": "2h",
             "options": {
                 "num_predict": num_predict,
                 "num_ctx": settings.ollama_context_window
@@ -78,28 +82,73 @@ class OllamaProvider(LLMProvider):
         if system_prompt:
             payload["system"] = system_prompt
 
-        try:
-            async with httpx.AsyncClient(timeout=timeout) as client:
-                response = await client.post(f"{self.base_url}/api/generate", json=payload)
-                if hasattr(response, "raise_for_status"):
-                    response.raise_for_status()
-                if hasattr(response, "json"):
-                    json_payload = response.json()
-                    data = await json_payload if hasattr(json_payload, "__await__") else json_payload
-                else:
-                    data = {}
-        except (TimeoutError, httpx.TimeoutException) as exc:
-            logger.exception("ollama_request_failed provider=ollama model={model} error=timeout", model=self.model)
-            raise ProviderTimeoutException("Ollama request timed out.") from exc
-        except httpx.HTTPStatusError as exc:
-            if exc.response is not None and exc.response.status_code in {401, 403}:
-                logger.warning("ollama_request_failed provider=ollama model={model} reason=auth", model=self.model)
-                raise ProviderAuthenticationException("Ollama authentication failed.") from exc
-            logger.exception("ollama_request_failed provider=ollama model={model} error={error}", model=self.model, error=exc.response.status_code if exc.response else "http")
-            raise AIProviderException(f"Ollama generation failed: {exc}") from exc
-        except httpx.HTTPError as exc:
-            logger.exception("ollama_request_failed provider=ollama model={model} error={error}", model=self.model, error=type(exc).__name__)
-            raise AIProviderException(f"Ollama generation failed: {exc}") from exc
+        # INFINITE RETRY LOOP WITH DYNAMIC LOAD BALANCING
+        # If the server is overloaded or drops connection, we rotate to the fallback server if available,
+        # otherwise we wait and try again.
+        import asyncio
+        max_retries = 100 # Practically infinite for normal downtime
+        base_wait = 10
+        
+        current_url = self.base_url
+
+        for attempt in range(max_retries):
+            try:
+                async with httpx.AsyncClient(timeout=timeout) as client:
+                    response = await client.post(f"{current_url}/api/generate", json=payload)
+                    if hasattr(response, "raise_for_status"):
+                        response.raise_for_status()
+                    if hasattr(response, "json"):
+                        json_payload = response.json()
+                        data = await json_payload if hasattr(json_payload, "__await__") else json_payload
+                    else:
+                        data = {}
+                # Success! Break out of the retry loop.
+                break
+                
+            except (TimeoutError, httpx.TimeoutException) as exc:
+                if self.fallback_url and current_url == self.base_url:
+                    logger.warning(f"ollama_primary_busy (Timeout). Rotating to fallback server {self.fallback_url}...")
+                    current_url = self.fallback_url
+                    continue
+                elif self.fallback_url and current_url == self.fallback_url:
+                    current_url = self.base_url # Swap back to try primary again next time
+                    
+                wait_time = min(base_wait + (attempt * 5), 60)
+                logger.warning(f"ollama_connection_dropped (Timeout). Waiting {wait_time}s... (Attempt {attempt+1})")
+                await asyncio.sleep(wait_time)
+                continue
+                
+            except httpx.HTTPStatusError as exc:
+                if exc.response is not None and exc.response.status_code in {401, 403}:
+                    raise ProviderAuthenticationException("Ollama authentication failed.") from exc
+                
+                if self.fallback_url and current_url == self.base_url:
+                    logger.warning(f"ollama_primary_busy (HTTP {exc.response.status_code if exc.response else 'Unknown'}). Rotating to fallback server...")
+                    current_url = self.fallback_url
+                    continue
+                elif self.fallback_url and current_url == self.fallback_url:
+                    current_url = self.base_url
+                    
+                wait_time = min(base_wait + (attempt * 5), 60)
+                logger.warning(f"ollama_server_overloaded (HTTP {exc.response.status_code if exc.response else 'Unknown'}). Waiting {wait_time}s to reconnect... (Attempt {attempt+1})")
+                await asyncio.sleep(wait_time)
+                continue
+                
+            except httpx.HTTPError as exc:
+                if self.fallback_url and current_url == self.base_url:
+                    logger.warning(f"ollama_primary_down ({type(exc).__name__}). Rotating to fallback server...")
+                    current_url = self.fallback_url
+                    continue
+                elif self.fallback_url and current_url == self.fallback_url:
+                    current_url = self.base_url
+                    
+                wait_time = min(base_wait + (attempt * 5), 60)
+                logger.warning(f"ollama_connection_failed ({type(exc).__name__}). Waiting {wait_time}s to reconnect... (Attempt {attempt+1})")
+                await asyncio.sleep(wait_time)
+                continue
+        else:
+            # If we somehow exhausted 100 retries
+            raise ProviderTimeoutException("Ollama server remained completely unresponsive after 100 reconnect attempts.")
 
         latency_ms = int((time.perf_counter() - start_time) * 1000)
         content = data.get("response", "")
@@ -146,6 +195,22 @@ class OllamaProvider(LLMProvider):
                     text = text.strip()
                 parsed = json.loads(text)
             except json.JSONDecodeError as jde:
+                # --- AUTO-REPAIR HEURISTICS FOR QWEN2.5 ---
+                # Qwen2.5 often injects raw newlines inside strings or truncates output.
+                try:
+                    # 1. Replace all raw newlines with spaces (JSON does not require newlines for syntax)
+                    repaired = text.replace('\n', ' ')
+                    # 2. Fix truncated JSON blocks
+                    if not repaired.strip().endswith('}') and not repaired.strip().endswith(']'):
+                        if repaired.count('"') % 2 != 0:
+                            repaired += '"}'
+                        else:
+                            repaired += '}'
+                    parsed = json.loads(repaired)
+                    return parsed
+                except Exception:
+                    pass
+                    
                 logger.warning(f"Ollama JSON parsing failed on attempt {attempt + 1}. Error: {str(jde)}. Raw content preview: {raw_response.content[:500]}")
                 if attempt == 1:
                     raise ProviderResponseException(f"Ollama returned invalid JSON for structured generation. Raw: {raw_response.content[:200]}")

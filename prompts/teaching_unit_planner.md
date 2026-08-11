@@ -17,6 +17,7 @@ Your primary task is to generate Teaching Units (Slides) for the specific batch 
 7. **CRITICAL (NO COPY-PASTING):** You MUST summarize the concepts in your own words. Do NOT copy and paste exact sentences or lines directly from the Raw Textbook Text. Paraphrase them into clear, engaging slide bullet points.
 8. **CRITICAL (JSON DICT ONLY):** You MUST output a single JSON dictionary object (`{{}}`). You MUST NOT output a list/array (`[]`) and you MUST NOT output a plain string. Failure to return a valid JSON dictionary will break the system.
 9. **CRITICAL (EXTRAPOLATION):** You MUST ALWAYS return the `units` array containing {batch_size} units. If the text lacks specific details, use your general knowledge of the subject to extrapolate, infer, and fill in the gaps to create high-quality educational content. NEVER complain, NEVER apologize, and NEVER output any structure other than the requested JSON.
+10. **CRITICAL (JSON SYNTAX):** To ensure valid JSON output, you MUST NOT use unescaped double quotes (`"`) inside your bullet sentences or titles. Use single quotes (`'`) instead. Do NOT use raw newlines to break paragraphs.
 
 ### Context:
 Target Subtopics (Batch):

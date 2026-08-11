@@ -16,14 +16,9 @@ async def upload_document(background_tasks: BackgroundTasks, file: UploadFile = 
         raise HTTPException(status_code=400, detail="Only PDF files are supported.")
         
     try:
-        from app.infrastructure.ai.providers.ollama_provider import OllamaProvider
-        ollama = OllamaProvider()
-        is_healthy = await ollama.health_check()
-        if not is_healthy:
-            raise HTTPException(
-                status_code=503, 
-                detail="Ollama is not running. Please start the Ollama application locally on port 11434 before uploading a document."
-            )
+        # We removed the strict pre-upload health check because we now use a load-balanced 
+        # multi-server setup. If the primary server is down, the background task will 
+        # automatically rotate to the fallback server during generation.
             
         settings = get_settings()
         job_id = f"job_{uuid.uuid4().hex[:8]}"

@@ -70,22 +70,22 @@ def test_schema_validator_teaching_unit_list():
             "lesson_id": "l1",
             "order": 1,
             "learning_goal": "Goal1",
-            "keywords": ["kw1", "kw2", "kw3"],
+            "bullet_sentences": ["kw1", "kw2", "kw3"],
             "source_refs": ["ref1"]
         }
     ]
     res = validator.validate(valid_list, TeachingUnit)
     assert res.is_valid is True
 
-    # Invalid list (keywords length too short)
+    # Invalid list (bullet_sentences length too short)
     invalid_list = [
         {
             "unit_id": "u1",
             "lesson_id": "l1",
             "order": 1,
             "learning_goal": "Goal1",
-            "keywords": ["kw1"],
-            "source_refs": []
+            "bullet_sentences": ["kw1"],
+            "source_refs": ["ref1"]
         }
     ]
     res = validator.validate(invalid_list, TeachingUnit)

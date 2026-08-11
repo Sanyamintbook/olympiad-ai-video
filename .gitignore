@@ -33,3 +33,5 @@ tmp_pytest_local/
 local_state.json
 *.tmp
 *.bak
+*.db
+*.sqlite3

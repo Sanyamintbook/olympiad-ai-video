@@ -13,25 +13,24 @@ class LessonPlannerAgent(BaseAgent):
 
     async def run(self, understanding: Understanding) -> LessonPlan:
         import json
-        context = {
-            "chapter_title": understanding.chapter_title,
-            "main_topic": understanding.main_topic,
-            "major_topics": understanding.major_topics,
-            "subtopics": json.dumps(understanding.subtopics, indent=2),
-            "learning_objectives": understanding.learning_objectives,
-            "understanding_json": understanding.model_dump_json()
-        }
+        import asyncio
+        
+        # ADVANCED BATCHED PRESERVATION GUARD
+        # To guarantee high-quality AI generated objectives for 94+ subtopics without LLM truncation,
+        # we process the subtopics in small batches of 15 and merge the results.
+        batch_size = 15
+        subtopics = understanding.subtopics
+        subtopic_batches = [subtopics[i:i + batch_size] for i in range(0, len(subtopics), batch_size)]
         
         schema = LessonPlan.model_json_schema()
+        semaphore = asyncio.Semaphore(2)
         
         def extract_fuzzy_key(data_dict, possible_keys, default_val=None):
             if not isinstance(data_dict, dict): return default_val
-            # Exact match first
             for pk in possible_keys:
                 for k in data_dict.keys():
                     if pk.lower() == k.lower():
                         return data_dict[k]
-            # Fuzzy match second
             for k in data_dict.keys():
                 for pk in possible_keys:
                     if pk.lower() in k.lower().replace("_", "").replace(" ", ""):
@@ -65,9 +64,7 @@ class LessonPlannerAgent(BaseAgent):
             else:
                 res["lessons"] = lessons_arr
             return res
-                
-        result_dict = await self.generate_structured("lesson_planner", schema=schema, context=context, validator=validate_result)
-        
+            
         def safe_int(val, default=10):
             if isinstance(val, int): return val
             if isinstance(val, float): return int(val)
@@ -78,17 +75,44 @@ class LessonPlannerAgent(BaseAgent):
                     return int(digits.group())
             return default
             
-        lessons_data = result_dict.get("lessons", [])
+        async def process_batch(batch):
+            async with semaphore:
+                context = {
+                    "chapter_title": understanding.chapter_title,
+                    "main_topic": understanding.main_topic,
+                    "major_topics": understanding.major_topics,
+                    "subtopics": json.dumps(batch, indent=2),
+                    "learning_objectives": understanding.learning_objectives,
+                    "understanding_json": "" 
+                }
+                try:
+                    result_dict = await self.generate_structured("lesson_planner", schema=schema, context=context, validator=validate_result)
+                    return result_dict.get("lessons", [])
+                except Exception as e:
+                    self.logger.warning(f"Lesson batch generation failed: {e}. Falling back to programmatic.")
+                    fallback = []
+                    for sub in batch:
+                        fallback.append({"title": sub, "objective": f"Detailed understanding of {sub}", "estimated_minutes": 5})
+                    return fallback
+
+        tasks = [process_batch(b) for b in subtopic_batches]
+        results = await asyncio.gather(*tasks)
+        
+        all_lessons_data = []
+        for res in results:
+            if isinstance(res, list):
+                all_lessons_data.extend(res)
+                
         lessons = []
-        for i, l in enumerate(lessons_data):
+        for i, l in enumerate(all_lessons_data):
             lessons.append(Lesson(
                 sequence=i+1,
                 title=extract_fuzzy_key(l, ["title", "name", "heading"], f"Lesson {i+1}"),
                 objective=extract_fuzzy_key(l, ["objective", "goal", "learning"], "Objective"),
-                estimated_minutes=safe_int(extract_fuzzy_key(l, ["minutes", "time", "duration", "estimated"], 10))
+                estimated_minutes=safe_int(extract_fuzzy_key(l, ["minutes", "time", "duration", "estimated"], 5))
             ))
             
         return LessonPlan(
-            document_id=understanding.document_id,
+            document_id=getattr(understanding, 'document_id', "unknown"),
             lessons=lessons
         )

@@ -14,10 +14,17 @@ Slide Bullet Points (Summarized Statements):
 Source Textbook Context (Base your narration strictly on this):
 {source_context}
 
+**CRITICAL JSON RULE:** You MUST output ONLY a valid JSON object. Do not wrap it in anything else. Do NOT include markdown tags or preamble.
+
 Required JSON structure:
 {{
-  "narration_text": "string"
+  "narration_text": "string (the full spoken script text)"
 }}
+
+**CRITICAL JSON SYNTAX PROTECTION:**
+- Do not use unescaped double quotes (") inside the narration text string. Use single quotes (') instead. 
+- Do NOT use raw newlines or paragraph breaks inside the string! The entire script MUST be a single, unbroken string.
+- Do NOT split the text into multiple quotes or paragraphs. Write everything as ONE continuous paragraph block inside the `"narration_text"` field.
 
 ### Instructions for narration style:
 1. Speak directly to the students in a warm, engaging, and conversational tone as an experienced teacher.

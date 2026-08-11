@@ -7,8 +7,8 @@ from pptx import Presentation
 
 def test_pptx_builder_creates_file():
     units = [
-        TeachingUnit(unit_id="u1", lesson_id="l1", order=1, learning_goal="Goal 1", keywords=["A", "B", "C"], source_refs=["ref"]),
-        TeachingUnit(unit_id="u2", lesson_id="l1", order=2, learning_goal="Goal 2", keywords=["D", "E", "F"], source_refs=["ref"])
+        TeachingUnit(unit_id="u1", lesson_id="l1", order=1, learning_goal="Goal 1", bullet_sentences=["A", "B", "C"], source_refs=["ref"]),
+        TeachingUnit(unit_id="u2", lesson_id="l1", order=2, learning_goal="Goal 2", bullet_sentences=["D", "E", "F"], source_refs=["ref"])
     ]
     
     narration_segments = [
@@ -29,7 +29,7 @@ def test_pptx_builder_creates_file():
     slide1 = prs.slides[0]
     tf = slide1.placeholders[1].text_frame
     bullets = [p.text for p in tf.paragraphs if p.text]
-    assert bullets == units[0].keywords
+    assert bullets == units[0].bullet_sentences
     
     # Assert slide 1 speaker notes match verbatim
     assert slide1.notes_slide.notes_text_frame.text == narration_segments[0].narration_text

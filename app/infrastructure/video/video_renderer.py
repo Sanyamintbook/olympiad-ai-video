@@ -51,49 +51,55 @@ class VideoRenderer:
                     pass
                 raise
                 
-            # 2. Build individual MP4 segments for each slide + audio
+            # 2. Build individual MP4 segments for each slide + audio in parallel
+            import re
+            import concurrent.futures
+
+            def extract_number(path):
+                match = re.search(r'\d+', path.name)
+                return int(match.group()) if match else 0
+                
+            images_list = [p for p in slides_folder.glob("*") if p.suffix.lower() == ".png"]
+            images = sorted(images_list, key=extract_number)
+            
             segment_files = []
+            render_tasks = []
             for i, entry in enumerate(timeline):
                 slide_num = i + 1
-                # PowerPoint exports slides as Slide1.PNG, Slide2.PNG, etc.
-                # However, local languages might change this (e.g., Diapositiva1.PNG). 
-                # We'll just sort the files in the directory by creation/name and assume order.
-                import re
-                def extract_number(path):
-                    match = re.search(r'\d+', path.name)
-                    return int(match.group()) if match else 0
-                    
-                images_list = [p for p in slides_folder.glob("*") if p.suffix.lower() == ".png"]
-                images = sorted(images_list, key=extract_number)
-                
                 if not images or i >= len(images):
                     raise FileNotFoundError(f"Could not find exported image for slide {slide_num}")
                     
                 image_file = images[i]
                 audio_file = Path(entry.audio_path)
                 segment_file = temp_path / f"segment_{slide_num}.mp4"
+                segment_files.append(segment_file)
+                render_tasks.append((slide_num, image_file, audio_file, segment_file))
                 
-                logger.info(f"Rendering segment {slide_num} from {image_file.name} and {audio_file.name}")
-                
-                # ffmpeg command to combine 1 image + 1 audio into a video segment
-                # -loop 1 loops the single image, -shortest cuts the video when the audio ends
+            def _render_single_segment(task_info):
+                slide_num, img_f, aud_f, seg_f = task_info
+                logger.info(f"Rendering segment {slide_num} from {img_f.name} and {aud_f.name}")
                 cmd = [
                     ffmpeg_cmd,
                     "-y", # overwrite output
                     "-loop", "1",
-                    "-i", str(image_file),
-                    "-i", str(audio_file),
+                    "-i", str(img_f),
+                    "-i", str(aud_f),
                     "-c:v", "libx264",
+                    "-preset", "fast",
+                    "-crf", "18",
                     "-tune", "stillimage",
                     "-c:a", "aac",
                     "-b:a", "192k",
                     "-pix_fmt", "yuv420p",
                     "-shortest",
-                    str(segment_file)
+                    str(seg_f)
                 ]
-                
                 subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                segment_files.append(segment_file)
+                
+            max_workers = min(8, (os.cpu_count() or 4))
+            logger.info(f"Parallelizing segment encoding across {max_workers} CPU threads...")
+            with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+                list(executor.map(_render_single_segment, render_tasks))
                 
             # 3. Concatenate all segments into the final video
             concat_list_path = temp_path / "concat.txt"
